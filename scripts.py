@@ -1,10 +1,13 @@
+# Bibliothèques standard de python
 import re
+import sys
 import csv
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
+
+# Packages externes installés par pip
 from loguru import logger
 from selectolax.parser import HTMLParser
-import sys
 import asyncio
 import aiohttp
 
@@ -186,7 +189,7 @@ async def main():
         donnees = await extraire_donnees(url, session)
 
     if donnees:
-        sauvegarder_en_csv(donnees, "donnees_courses_hippiques.csv")
+        sauvegarder_en_csv(donnees, "donnees_courses.csv")
     else:
         logger.error("Aucune donnée extraite, fichier CSV non créé")
 

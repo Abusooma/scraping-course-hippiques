@@ -2,3 +2,4 @@ loguru==0.7.2
 requests==2.32.3
 selectolax==0.3.21
 aiohttp==3.10.5
+aiohttp-socks
