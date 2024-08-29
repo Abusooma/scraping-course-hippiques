@@ -11,6 +11,7 @@ from selectolax.parser import HTMLParser
 import asyncio
 import aiohttp
 
+
 def configurer_logger():
     """Configure le logger avec les paramètres appropriés."""
     fichier_log = "fichier.log"
@@ -26,7 +27,7 @@ def extraire_date_de_url(url: str) -> str:
         chaine_date = correspondance_date.group(1)
         objet_date = datetime.strptime(chaine_date, '%Y-%m-%d')
         return objet_date.strftime('%d/%m/%Y')
-    logger.warning("Date non trouvée dans l'URL")
+    logger.warning(f"Date non trouvée dans l'URL: {url}")
     return ""
 
 
@@ -52,7 +53,7 @@ def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
             raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
 
         return hippodrome
-    
+
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
         return None
@@ -100,7 +101,8 @@ def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
         # Recuperer toutes les tables dans le HTML:
         tables = arbre.css('table')
         # Recuperer le tableau qui contient les gains des chevaux
-        tableau_des_gains = [table for table in tables if table.css_first('span.leftWidth100')]
+        tableau_des_gains = [
+            table for table in tables if table.css_first('span.leftWidth100')]
         # Recuperer les Noeud des gains dans leur tableau trouvé
         noeuds_gains = tableau_des_gains[0].css('tbody tr td:nth-child(8)')
 
@@ -147,11 +149,11 @@ async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str
             "donnees_chevaux": donnees_chevaux
         }
     except Exception as e:
-        logger.error(f"Erreur HTTP survenue : {e}")
+        logger.error(f"Erreur HTTP survenue pour l'URL {url}: {e}")
         return {}
 
 
-def sauvegarder_en_csv(donnees: Dict[str, any], nom_fichier: str):
+def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str):
     """Sauvegarde les données extraites dans un fichier CSV."""
     noms_champs = ['DATE', 'Hippodrome', 'COURSE', 'NumChev', 'CHEVAL',
                    'PLACE', 'RAP-G', 'RAP-P', 'PARTANTS', 'I-Gains', 'I-Prix du jour']
@@ -161,35 +163,46 @@ def sauvegarder_en_csv(donnees: Dict[str, any], nom_fichier: str):
             ecrivain = csv.DictWriter(fichier_csv, fieldnames=noms_champs)
             ecrivain.writeheader()
 
-            for i, cheval in enumerate(donnees['donnees_chevaux'], start=1):
-                ecrivain.writerow({
-                    'DATE': donnees['date'],
-                    'Hippodrome': donnees['hippodrome'],
-                    'COURSE': donnees['numero_course'],
-                    'NumChev': i,
-                    'CHEVAL': cheval['nom'],
-                    'PLACE': '',  # Non disponible dans les données actuelles
-                    'RAP-G': '',  # Non disponible dans les données actuelles
-                    'RAP-P': '',  # Non disponible dans les données actuelles
-                    'PARTANTS': donnees['partants'],
-                    'I-Gains': cheval['gain'],
-                    'I-Prix du jour': donnees['prix']
-                })
+            for donnees in toutes_donnees:
+                for i, cheval in enumerate(donnees['donnees_chevaux'], start=1):
+                    ecrivain.writerow({
+                        'DATE': donnees['date'],
+                        'Hippodrome': donnees['hippodrome'],
+                        'COURSE': donnees['numero_course'],
+                        'NumChev': i,
+                        'CHEVAL': cheval['nom'],
+                        'PLACE': '',  # Non disponible dans les données actuelles
+                        'RAP-G': '',  # Non disponible dans les données actuelles
+                        'RAP-P': '',  # Non disponible dans les données actuelles
+                        'PARTANTS': donnees['partants'],
+                        'I-Gains': cheval['gain'],
+                        'I-Prix du jour': donnees['prix']
+                    })
         logger.info(f"Données sauvegardées avec succès dans {nom_fichier}")
     except Exception as e:
         logger.error(f"Erreur lors de la sauvegarde des données en CSV : {e}")
 
 
+async def traiter_urls(urls: List[str]) -> List[Dict[str, any]]:
+    """Traite une liste d'URLs de manière asynchrone."""
+    async with aiohttp.ClientSession() as session:
+        taches = [extraire_donnees(url, session) for url in urls]
+        resultats = await asyncio.gather(*taches)
+    # Filtre les résultats vides
+    return [resultat for resultat in resultats if resultat]
+
+
 async def main():
     """Fonction principale pour exécuter l'extracteur."""
     configurer_logger()
-    url = "https://www.geny.com/partants-pmu/2024-08-26-vincennes-pmu-prix-de-barbizon_c1514560"
 
-    async with aiohttp.ClientSession() as session:
-        donnees = await extraire_donnees(url, session)
+    """Mettez toutes vos urls avec le prefixe "https://www.geny.com/partants-pmu/" Avant d'executer le programme"""
+    urls = []
 
-    if donnees:
-        sauvegarder_en_csv(donnees, "donnees_courses.csv")
+    toutes_donnees = await traiter_urls(urls)
+
+    if toutes_donnees:
+        sauvegarder_en_csv(toutes_donnees, "donnees_courses.csv")
     else:
         logger.error("Aucune donnée extraite, fichier CSV non créé")
 
