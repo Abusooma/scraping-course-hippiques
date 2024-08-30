@@ -41,7 +41,7 @@ Tu devrais voir quelque chose comme ça :
 
 ## Problèmes ?
 
-- Vérifie que vous avez bien activé l'environnement virtuel avant d'installer les dépendances ou d'exécuter le script.
+- Vérifie que vous tu as bien activé l'environnement virtuel avant d'installer les dépendances ou d'exécuter le script.
 
 
 Si tu as des questions, n'hésite pas à me contacter !
