@@ -32,28 +32,67 @@ def extraire_date_de_url(url: str) -> str:
     return ""
 
 
+# def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
+#     """Extrait le nom de l'hippodrome du HTML."""
+#     try:
+#         noeud_hippodrome = arbre.css_first("div.nomReunion")
+#         if noeud_hippodrome is None:
+#             raise ValueError("Nœud 'div.nomReunion' non trouvé")
+
+#         texte_hippodrome = noeud_hippodrome.text()
+   
+#         if not texte_hippodrome:
+#             raise ValueError("Le texte de l'hippodrome est vide")
+
+#         hippodrome_nettoye = re.sub(r'[^A-Za-z0-9:]', '', texte_hippodrome)
+#         print(hippodrome_nettoye)
+#         hippodrome_nettoye = hippodrome_nettoye.split(':')
+
+#         if len(hippodrome_nettoye) < 2:
+#             raise ValueError("Format de texte d'hippodrome incorrect")
+
+#         hippodrome = hippodrome_nettoye[1][:-2]
+#         if not hippodrome:
+#             raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
+        
+
+#         return hippodrome
+
+#     except Exception as e:
+#         logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
+#         return None
+
+
 def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
-    """Extrait le nom de l'hippodrome du HTML."""
+    """Extrait le nom de l'hippodrome du HTML en préservant les accents."""
     try:
         noeud_hippodrome = arbre.css_first("div.nomReunion")
         if noeud_hippodrome is None:
             raise ValueError("Nœud 'div.nomReunion' non trouvé")
 
-        texte_hippodrome = noeud_hippodrome.text()
+        texte_hippodrome = noeud_hippodrome.text().strip()
         if not texte_hippodrome:
             raise ValueError("Le texte de l'hippodrome est vide")
 
-        hippodrome_nettoye = re.sub(r'[^A-Za-z0-9:]', '', texte_hippodrome)
-        hippodrome_nettoye = hippodrome_nettoye.split(':')
+        # Utiliser une expression régulière pour extraire le nom de l'hippodrome
+        match = re.search(r':\s*(.+?)\s*\(', texte_hippodrome)
+        if match:
+            hippodrome = match.group(1).strip()
+        else:
+            # Si le format ne correspond pas, essayer une autre approche
+            parts = texte_hippodrome.split(':')
+            if len(parts) > 1:
+                hippodrome = parts[1].split('(')[0].strip()
+            else:
+                hippodrome = texte_hippodrome
 
-        if len(hippodrome_nettoye) < 2:
-            raise ValueError("Format de texte d'hippodrome incorrect")
+        hippodrome_nettoye = re.sub(r'[^A-Za-zÀ-ÿ0-9\s-]', '', hippodrome)
+        hippodrome_nettoye = ' '.join(hippodrome_nettoye.split())
 
-        hippodrome = hippodrome_nettoye[1][:-2]
-        if not hippodrome:
+        if not hippodrome_nettoye:
             raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
 
-        return hippodrome
+        return hippodrome_nettoye
 
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
@@ -263,8 +302,7 @@ async def main():
 
     """Mettez toutes vos urls avec le prefixe "https://www.geny.com/partants-pmu/" Avant d'executer le programme"""
     urls = [
-        "https://www.geny.com/partants-pmu/2024-09-01-salon-de-provence-pmu-prix-d-arles_c1515880"
-        
+        "https://www.geny.com/partants-pmu/2024-09-02-le-croise-laroche-pmu-prix-louis-decaudin_c1515752"    
     ]
     
     toutes_donnees = await traiter_urls(urls)
