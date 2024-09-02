@@ -94,8 +94,11 @@ def extraire_prix_et_partants(arbre: HTMLParser) -> Tuple[Optional[int], Optiona
         correspondance_partants = re.search(r'-\s*(\d+)\s*Partants', texte_info_course)
 
         if correspondance_prix and correspondance_partants:
-            prix_str = correspondance_prix.group(1).replace(' ', '')
-            prix = int(prix_str[:-3]) if len(prix_str) > 3 else int(prix_str)
+            prix_str = correspondance_prix.group(1).replace(" ", "")
+            prix_str_nettoye = re.sub(r'[^\x20-\x7E]', '', prix_str)
+            prix = int(prix_str_nettoye)/1000
+            if prix.is_integer():
+                prix = int(prix)
             partants = correspondance_partants.group(1).replace(' ', '')
             return prix, partants
         else:
@@ -107,80 +110,54 @@ def extraire_prix_et_partants(arbre: HTMLParser) -> Tuple[Optional[int], Optiona
         return None, None
 
 
-# def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
-#     """Extrait les chevaux et leurs gains du HTML."""
-#     donnees_chevaux = []
-#     try:
-#         noeuds_chevaux = arbre.css("span.leftWidth100 a.lienFiche")
-#         # Recuperer tous les tableaux dans le HTML:
-#         tous_tableaux = arbre.css('table')
-#         # Recuperer le tableau qui contient les gains des chevaux
-#         tableau_des_gains = None
-#         for tableau in tous_tableaux:
-#             if tableau.css_first('span.leftWidth100'):
-#                 tableau_des_gains = tableau
-#                 break
-
-#         # Recuperer les Noeud des gains dans leur tableau trouvé
-#         if tableau_des_gains:
-#             noeuds_gains = tableau_des_gains.css('tbody tr td:nth-child(8)')
-#         else:
-#             logger.error("Aucun tableau contenant des gains n'a été trouvé")
-#             return donnees_chevaux
-
-#         if not noeuds_chevaux or not noeuds_gains:
-#             logger.error("Aucun cheval ou gain trouvé dans le tableau")
-#             return donnees_chevaux
-
-#         for cheval, gain in zip(noeuds_chevaux, noeuds_gains):
-#             try:
-#                 nom_cheval = cheval.text().strip()
-#                 texte_gain = gain.text().strip()
-#                 if nom_cheval and texte_gain:
-#                     donnees_chevaux.append(
-#                         {"nom": nom_cheval, "gain": texte_gain})
-#             except AttributeError as e:
-#                 logger.error(
-#                     f"Erreur lors de l'extraction des données du cheval : {e}")
-
-#     except Exception as e:
-#         logger.error(f"Erreur générale lors de l'analyse : {e}")
-
-#     return donnees_chevaux
 
 def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
-    """Extrait les chevaux et leurs gains du HTML."""
+    """Extrait les chevaux, leurs gains et leurs cotes PMU du HTML."""
     donnees_chevaux = []
     try:
-        # Trouver le tableau contenant les données des chevaux
         tableau = arbre.css_first('table#tableau_partants')
         if not tableau:
             logger.error("Tableau des partants non trouvé")
             return donnees_chevaux
 
-        # Trouver l'index de la colonne "Gains"
         headers = tableau.css('thead th')
         gains_index = next((i for i, header in enumerate(
             headers) if header.text().strip() == "Gains"), None)
+        cotes_pmu_index = next((i for i, header in enumerate(
+            headers) if "Cotes" in header.text().strip()), None)
 
-        if gains_index is None:
-            logger.error("Colonne 'Gains' non trouvée dans le tableau")
+        if gains_index is None or cotes_pmu_index is None:
+            logger.error(
+                "Colonne 'Gains' ou colonne des cotes non trouvée dans le tableau")
             return donnees_chevaux
 
-        # Extraire les noms des chevaux et leurs gains
         lignes = tableau.css('tbody tr')
         for ligne in lignes:
             try:
                 nom_cheval = ligne.css_first('span.leftWidth100 a.lienFiche')
-                # +1 car les index CSS commencent à 1
                 gain = ligne.css(f'td:nth-child({gains_index + 1})')
+                cote_pmu = ligne.css(f'td:nth-child({cotes_pmu_index + 1})')
 
-                if nom_cheval and gain:
+                if nom_cheval and gain and cote_pmu:
                     nom = nom_cheval.text().strip()
                     gain_texte = gain[0].text().strip() if gain else ""
-                    if nom and gain_texte:
-                        donnees_chevaux.append(
-                            {"nom": nom, "gain": gain_texte})
+                    if cote_pmu:
+                        cote_pmu_texte = cote_pmu[0].text().strip()
+                        cote_pmu_texte = re.sub(r'[^\x20-\x7E]', '', cote_pmu_texte)
+                        cote_pmu_texte = cote_pmu_texte.strip('"').replace(',', '.')
+                    else:
+                        cote_pmu = ""
+
+                    if nom and (gain_texte or gain_texte == "") and (cote_pmu_texte or cote_pmu_texte == ""):
+                        if gain_texte == "":
+                            gain_texte = '0'
+                        if cote_pmu_texte == "":
+                            cote_pmu_texte = '0'
+                        donnees_chevaux.append({
+                            "nom": nom,
+                            "gain": gain_texte,
+                            "cote_pmu": cote_pmu_texte
+                        })
             except AttributeError as e:
                 logger.error(
                     f"Erreur lors de l'extraction des données du cheval : {e}")
@@ -195,7 +172,7 @@ async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str
     """Extrait les données de l'URL donnée de manière asynchrone."""
     try:
         async with session.get(url) as response:
-            texte_html = await response.text()
+            texte_html = await response.text(encoding='utf-8')
         arbre = HTMLParser(texte_html)
 
         date = extraire_date_de_url(url)
@@ -217,17 +194,38 @@ async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str
         return {}
 
 
+def calculer_gains_min_max(donnees_chevaux: List[Dict[str, str]]) -> Tuple[int, int]:
+    """Calcule les gains minimum et maximum parmi les chevaux."""
+    gains = []
+    for cheval in donnees_chevaux:
+        gain_str = cheval['gain'].replace(' ', '').replace('€', '')
+        try:
+            gain = int(gain_str)
+            gains.append(gain)
+        except ValueError:
+            logger.warning(
+                f"Impossible de convertir le gain en entier: {cheval['gain']}")
+
+    if gains:
+        return min(gains), max(gains)
+    return 0, 0
+
+
 def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str):
     """Sauvegarde les données extraites dans un fichier CSV."""
     noms_champs = ['DATE', 'Hippodrome', 'COURSE', 'NumChev', 'CHEVAL',
-                   'PLACE', 'RAP-G', 'RAP-P', 'PARTANTS', 'I-Gains', 'I-Prix du jour']
+                   'PLACE', 'RAP-G', 'RAP-P', 'PARTANTS', 'I-Gains', 'I-Prix du jour',
+                   'I-Moins-Riche', 'I-Plus-Riche', 'Cotes-Pmu']
 
     try:
-        with open(nom_fichier, 'w', newline='', encoding='utf-8') as fichier_csv:
+        with open(nom_fichier, 'w', newline='', encoding='utf-8-sig') as fichier_csv:
             ecrivain = csv.DictWriter(fichier_csv, fieldnames=noms_champs)
             ecrivain.writeheader()
 
             for donnees in toutes_donnees:
+                moins_riche, plus_riche = calculer_gains_min_max(
+                    donnees['donnees_chevaux'])
+
                 for i, cheval in enumerate(donnees['donnees_chevaux'], start=1):
                     ecrivain.writerow({
                         'DATE': donnees['date'],
@@ -240,7 +238,10 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str):
                         'RAP-P': '',  # Non disponible dans les données actuelles
                         'PARTANTS': donnees['partants'],
                         'I-Gains': cheval['gain'],
-                        'I-Prix du jour': donnees['prix']
+                        'I-Prix du jour': donnees['prix'],
+                        'I-Moins-Riche': moins_riche,
+                        'I-Plus-Riche': plus_riche,
+                        'Cotes-Pmu': cheval['cote_pmu']
                     })
         logger.info(f"Données sauvegardées avec succès dans {nom_fichier}")
     except Exception as e:
@@ -262,16 +263,10 @@ async def main():
 
     """Mettez toutes vos urls avec le prefixe "https://www.geny.com/partants-pmu/" Avant d'executer le programme"""
     urls = [
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-lampetia_c1515327",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-amalia_c1515330",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-athamantis_c1515328",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-diotima_c1515323",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-algeiba_c1515325",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-gisella_c1515326",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-danae_c1515329",
-            "https://www.geny.com/partants-pmu/2024-08-30-vincennes-pmu-prix-dorado_c1515324"
+        "https://www.geny.com/partants-pmu/2024-09-01-salon-de-provence-pmu-prix-d-arles_c1515880"
+        
     ]
-
+    
     toutes_donnees = await traiter_urls(urls)
 
     if toutes_donnees:
