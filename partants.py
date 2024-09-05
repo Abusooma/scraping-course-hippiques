@@ -1,12 +1,12 @@
-# Bibliothèques standard de python
-import requests
 import re
 import sys
 import csv
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
-# Packages externes installés par pip
+import pandas as pd
+from unidecode import unidecode
+
 from loguru import logger
 from selectolax.parser import HTMLParser
 import asyncio
@@ -15,7 +15,7 @@ import aiohttp
 
 def configurer_logger():
     """Configure le logger avec les paramètres appropriés."""
-    fichier_log = "fichier.log"
+    fichier_log = "log_partants.log"
     logger.add(fichier_log, rotation="500 KB",
                retention="3 days", level="WARNING")
     logger.add(sys.stderr, level="INFO")
@@ -32,37 +32,6 @@ def extraire_date_de_url(url: str) -> str:
     return ""
 
 
-# def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
-#     """Extrait le nom de l'hippodrome du HTML."""
-#     try:
-#         noeud_hippodrome = arbre.css_first("div.nomReunion")
-#         if noeud_hippodrome is None:
-#             raise ValueError("Nœud 'div.nomReunion' non trouvé")
-
-#         texte_hippodrome = noeud_hippodrome.text()
-   
-#         if not texte_hippodrome:
-#             raise ValueError("Le texte de l'hippodrome est vide")
-
-#         hippodrome_nettoye = re.sub(r'[^A-Za-z0-9:]', '', texte_hippodrome)
-#         print(hippodrome_nettoye)
-#         hippodrome_nettoye = hippodrome_nettoye.split(':')
-
-#         if len(hippodrome_nettoye) < 2:
-#             raise ValueError("Format de texte d'hippodrome incorrect")
-
-#         hippodrome = hippodrome_nettoye[1][:-2]
-#         if not hippodrome:
-#             raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
-        
-
-#         return hippodrome
-
-#     except Exception as e:
-#         logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
-#         return None
-
-
 def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
     """Extrait le nom de l'hippodrome du HTML en préservant les accents."""
     try:
@@ -74,12 +43,10 @@ def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
         if not texte_hippodrome:
             raise ValueError("Le texte de l'hippodrome est vide")
 
-        # Utiliser une expression régulière pour extraire le nom de l'hippodrome
         match = re.search(r':\s*(.+?)\s*\(', texte_hippodrome)
         if match:
             hippodrome = match.group(1).strip()
         else:
-            # Si le format ne correspond pas, essayer une autre approche
             parts = texte_hippodrome.split(':')
             if len(parts) > 1:
                 hippodrome = parts[1].split('(')[0].strip()
@@ -149,7 +116,6 @@ def extraire_prix_et_partants(arbre: HTMLParser) -> Tuple[Optional[int], Optiona
         return None, None
 
 
-
 def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
     """Extrait les chevaux, leurs gains et leurs cotes PMU du HTML."""
     donnees_chevaux = []
@@ -180,13 +146,12 @@ def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
                 if nom_cheval and gain and cote_pmu:
                     nom = nom_cheval.text().strip()
                     gain_texte = gain[0].text().strip() if gain else ""
-                    if cote_pmu:
-                        cote_pmu_texte = cote_pmu[0].text().strip()
-                        cote_pmu_texte = re.sub(r'[^\x20-\x7E]', '', cote_pmu_texte)
-                        cote_pmu_texte = cote_pmu_texte.strip('"').replace(',', '.')
-                    else:
-                        cote_pmu = ""
-
+                  
+                    cote_pmu_texte = cote_pmu[0].text().strip()
+                    cote_pmu_texte = re.sub(r'[^\x20-\x7E]', '', cote_pmu_texte)
+                    cote_pmu_texte = cote_pmu_texte.replace('-', "")
+                    cote_pmu_texte = cote_pmu_texte.strip('"').replace(',', '.')
+                 
                     if nom and (gain_texte or gain_texte == "") and (cote_pmu_texte or cote_pmu_texte == ""):
                         if gain_texte == "":
                             gain_texte = '0'
@@ -205,6 +170,18 @@ def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
         logger.error(f"Erreur générale lors de l'analyse : {e}")
 
     return donnees_chevaux
+
+
+def charger_donnees_excel(chemin_fichier: str) -> pd.DataFrame:
+    """Charge les données du fichier Excel (.xls ou .xlsx) et les prépare pour la correspondance."""
+    try:
+        engine = 'xlrd' if chemin_fichier.endswith('.xls') else None
+        df = pd.read_excel(chemin_fichier, engine=engine)
+        df['Hippodrome'] = df['Hippodrome'].apply(lambda x: unidecode(str(x)).upper())
+        return df
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement du fichier Excel : {e}")
+        return pd.DataFrame()
 
 
 async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str, any]:
@@ -242,19 +219,19 @@ def calculer_gains_min_max(donnees_chevaux: List[Dict[str, str]]) -> Tuple[int, 
             gain = int(gain_str)
             gains.append(gain)
         except ValueError:
-            logger.warning(
-                f"Impossible de convertir le gain en entier: {cheval['gain']}")
+            logger.warning(f"Impossible de convertir le gain en entier: {cheval['gain']}")
 
     if gains:
         return min(gains), max(gains)
     return 0, 0
 
 
-def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str):
-    """Sauvegarde les données extraites dans un fichier CSV."""
+def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, donnees_excel: pd.DataFrame):
+    """Sauvegarde les données extraites dans un fichier CSV avec des champs enrichis."""
     noms_champs = ['DATE', 'Hippodrome', 'COURSE', 'NumChev', 'CHEVAL',
                    'PLACE', 'RAP-G', 'RAP-P', 'PARTANTS', 'I-Gains', 'I-Prix du jour',
-                   'I-Moins-Riche', 'I-Plus-Riche', 'Cotes-Pmu']
+                   'I-Moins-Riche', 'I-Plus-Riche', 'Cotes-Pmu', 'Statut',
+                   'L1', 'L2', 'D-P', 'D-C', 'D-N', 'D-L', 'D-B', 'D-C2', 'A']
 
     try:
         with open(nom_fichier, 'w', newline='', encoding='utf-8-sig') as fichier_csv:
@@ -265,27 +242,45 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str):
                 moins_riche, plus_riche = calculer_gains_min_max(
                     donnees['donnees_chevaux'])
 
+                hippodrome_norm = unidecode(donnees['hippodrome']).upper()
+                donnees_hippodrome = donnees_excel[donnees_excel['Hippodrome']
+                                                   == hippodrome_norm]
+
+                valeurs_excel = {col: '0' for col in [
+                    'L1', 'L2', 'D-P', 'D-C', 'D-N', 'D-L', 'D-B', 'D-C2', 'A']}
+
+                if not donnees_hippodrome.empty:
+                    for col in valeurs_excel.keys():
+                        valeur = donnees_hippodrome.iloc[0].get(col, '0')
+                        valeurs_excel[col] = '0' if pd.isna(
+                            valeur) else str(valeur)
+
                 for i, cheval in enumerate(donnees['donnees_chevaux'], start=1):
-                    ecrivain.writerow({
+                    ligne = {
                         'DATE': donnees['date'],
                         'Hippodrome': donnees['hippodrome'],
                         'COURSE': donnees['numero_course'],
                         'NumChev': i,
                         'CHEVAL': cheval['nom'],
-                        'PLACE': '',  # Non disponible dans les données actuelles
-                        'RAP-G': '',  # Non disponible dans les données actuelles
-                        'RAP-P': '',  # Non disponible dans les données actuelles
+                        'PLACE': '',
+                        'RAP-G': '',
+                        'RAP-P': '',
                         'PARTANTS': donnees['partants'],
                         'I-Gains': cheval['gain'],
                         'I-Prix du jour': donnees['prix'],
                         'I-Moins-Riche': moins_riche,
                         'I-Plus-Riche': plus_riche,
-                        'Cotes-Pmu': cheval['cote_pmu']
-                    })
-        logger.info(f"Données sauvegardées avec succès dans {nom_fichier}")
+                        'Cotes-Pmu': cheval['cote_pmu'],
+                        'Statut': '',
+                        **valeurs_excel
+                    }
+                    ecrivain.writerow(ligne)
+        logger.info(
+            f"Données enrichies sauvegardées avec succès dans {nom_fichier}")
     except Exception as e:
-        logger.error(f"Erreur lors de la sauvegarde des données en CSV : {e}")
-
+        logger.error(
+            f"Erreur lors de la sauvegarde des données enrichies en CSV : {e}")
+        
 
 async def traiter_urls(urls: List[str]) -> List[Dict[str, any]]:
     """Traite une liste d'URLs de manière asynchrone."""
@@ -297,21 +292,25 @@ async def traiter_urls(urls: List[str]) -> List[Dict[str, any]]:
 
 
 async def main():
-    """Fonction principale pour exécuter l'extracteur."""
+    """Fonction principale pour exécuter l'extracteur et enrichir les données."""
     configurer_logger()
 
-    """Mettez toutes vos urls avec le prefixe "https://www.geny.com/partants-pmu/" Avant d'executer le programme"""
     urls = [
-        "https://www.geny.com/partants-pmu/2024-09-02-le-croise-laroche-pmu-prix-louis-decaudin_c1515752"    
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-prix-v-and-b_c1515922",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-chaussee-aux-moines_c1515923",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-des-transports-gillois-prix-tenor-de-baune_c1515924",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-dirickx-prix-intermede_c1515925",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-groupe-gendry-prix-pmu-bar-de-l-etoile_c1515926",
     ]
-    
+
     toutes_donnees = await traiter_urls(urls)
 
     if toutes_donnees:
-        sauvegarder_en_csv(toutes_donnees, "donnees_courses.csv")
+        donnees_excel = charger_donnees_excel("FichierH.xls")
+        sauvegarder_en_csv(
+            toutes_donnees, "donnees_courses_partants.csv", donnees_excel)
     else:
         logger.error("Aucune donnée extraite, fichier CSV non créé")
 
 if __name__ == '__main__':
     asyncio.run(main())
-   
