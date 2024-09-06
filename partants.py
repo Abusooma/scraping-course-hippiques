@@ -184,6 +184,12 @@ def charger_donnees_excel(chemin_fichier: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# ... (autres fonctions inchangées) ...
+
+def extraire_identifiant_unique(donnees: Dict[str, any]) -> str:
+    """Crée un identifiant unique pour la course à partir des données extraites."""
+    return f"{donnees['date']}_{donnees['hippodrome']}_{donnees['numero_course']}"
+
 async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str, any]:
     """Extrait les données de l'URL donnée de manière asynchrone."""
     try:
@@ -197,18 +203,19 @@ async def extraire_donnees(url: str, session: aiohttp.ClientSession) -> Dict[str
         prix, partants = extraire_prix_et_partants(arbre)
         donnees_chevaux = extraire_chevaux_et_gains(arbre)
 
-        return {
+        donnees = {
             "date": date,
             "hippodrome": hippodrome,
             "numero_course": numero_course,
             "prix": prix,
             "partants": partants,
-            "donnees_chevaux": donnees_chevaux
+            "donnees_chevaux": donnees_chevaux,
         }
+        donnees["identifiant_unique"] = extraire_identifiant_unique(donnees)
+        return donnees
     except Exception as e:
         logger.error(f"Erreur HTTP survenue pour l'URL {url}: {e}")
         return {}
-
 
 def calculer_gains_min_max(donnees_chevaux: List[Dict[str, str]]) -> Tuple[int, int]:
     """Calcule les gains minimum et maximum parmi les chevaux."""
