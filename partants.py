@@ -296,11 +296,11 @@ async def main():
     configurer_logger()
 
     urls = [
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-prix-v-and-b_c1515922",
         "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-chaussee-aux-moines_c1515923",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-prix-v-and-b_c1515922",
         "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-des-transports-gillois-prix-tenor-de-baune_c1515924",
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-dirickx-prix-intermede_c1515925",
         "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-groupe-gendry-prix-pmu-bar-de-l-etoile_c1515926",
+        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-dirickx-prix-intermede_c1515925",
     ]
 
     toutes_donnees = await traiter_urls(urls)

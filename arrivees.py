@@ -7,7 +7,7 @@ from loguru import logger
 from typing import Optional
 
 # Configuration du logger
-logger.add("log_arrivees.log", rotation="1 MB", level="INFO")
+logger.add("log_arrivees.log", rotation="1 MB", level="WARNING", retention="3 days")
 
 
 async def lire_csv(nom_fichier: str) -> List[Dict[str, str]]:
@@ -57,11 +57,9 @@ def extraire_places(arbre: HTMLParser) -> Dict[str, int]:
             place = cells[0].text(strip=True)
             numero = cells[1].text(strip=True)
 
-            # Vérifier si le numéro est valide
             if not numero.isdigit():
                 continue
 
-            # Traiter les cas spéciaux
             if any(status in place.lower() for status in ['dai', 'dpj', 'd']):
                 places[numero] = 15
             elif place.isdigit():
@@ -71,8 +69,6 @@ def extraire_places(arbre: HTMLParser) -> Dict[str, int]:
                 places[numero] = 12
             else:
                 places[numero] = 12
-
-        logger.info(f"Places extraites : {places}")
 
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction des places : {e}")
@@ -156,13 +152,12 @@ async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Di
         for ligne in donnees_csv:
             if ligne['COURSE'] == numero_course:
                 numero_cheval = ligne['NumChev']
-                # Mise à jour des rapports
                 if numero_cheval in resultats_pmu:
                     ligne['RAP-G'], ligne['RAP-P'] = resultats_pmu[numero_cheval]
                 else:
                     ligne['RAP-G'], ligne['RAP-P'] = '0', '0'
 
-                # Mise à jour de la place
+                
                 ligne['PLACE'] = str(places.get(numero_cheval, 12))
 
         logger.info(
