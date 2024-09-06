@@ -21,39 +21,78 @@ async def lire_csv(nom_fichier: str) -> List[Dict[str, str]]:
         logger.error(
             f"Erreur lors de la lecture du fichier CSV {nom_fichier}: {e}")
         return []
-    
 
-def extraire_numero_course(arbre: HTMLParser) -> Optional[int]:
+
+def extraire_numero_course(arbre: HTMLParser) -> Optional[str]:
     """Extrait le numéro de course du HTML."""
     try:
         noeud_numero_course = arbre.css_first("span h1")
         if noeud_numero_course:
             numero_course_text = noeud_numero_course.text().strip()
+            return numero_course_text[0]
         else:
-            logger.error("Aucun noeud correpondant au Numero de course")
+            logger.error("Aucun noeud correspondant au Numéro de course")
             return None
-
-        return numero_course_text[0]
-
     except IndexError as e:
-        logger.error("Erreur d'accès au numero de course dans le texte")
+        logger.error("Erreur d'accès au numéro de course dans le texte")
         return None
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction du numéro de course : {e}")
         return None
 
-    
 
-async def extraire_donnees_arrivee(html_content: str) -> Dict[str, Tuple[str, str]]:
-    resultats = {}
+def extraire_places(arbre: HTMLParser) -> Dict[str, int]:
+    places = {}
+    try:
+        table_arrivees = arbre.css_first('table#arrivees')
+        if not table_arrivees:
+            logger.warning("Tableau des arrivées non trouvé dans le HTML.")
+            return places
+
+        for row in table_arrivees.css('tr'):
+            cells = row.css('td')
+            if len(cells) < 3:
+                continue
+
+            place = cells[0].text(strip=True)
+            numero = cells[1].text(strip=True)
+
+            # Vérifier si le numéro est valide
+            if not numero.isdigit():
+                continue
+
+            # Traiter les cas spéciaux
+            if any(status in place.lower() for status in ['dai', 'dpj', 'd']):
+                places[numero] = 15
+            elif place.isdigit():
+                place_int = int(place)
+                places[numero] = min(place_int, 12)
+            elif place.lower() in ['a', 't']:
+                places[numero] = 12
+            else:
+                places[numero] = 12
+
+        logger.info(f"Places extraites : {places}")
+
+    except Exception as e:
+        logger.error(f"Erreur lors de l'extraction des places : {e}")
+
+    return places
+
+
+async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[str, str]], Dict[str, int], Optional[str]]:
+    resultats_pmu = {}
+    places = {}
+    numero_course = None
     try:
         parser = HTMLParser(html_content)
 
-        # Extraire le numéro de course
         numero_course = extraire_numero_course(parser)
         if not numero_course:
             logger.warning("Numéro de course non trouvé dans le HTML.")
-            return resultats
+            return resultats_pmu, places, numero_course
+
+        places = extraire_places(parser)
 
         # Trouver la div PMU
         pmu_div = None
@@ -64,7 +103,7 @@ async def extraire_donnees_arrivee(html_content: str) -> Dict[str, Tuple[str, st
 
         if not pmu_div:
             logger.warning("Section PMU non trouvée dans le HTML.")
-            return resultats
+            return resultats_pmu, places, numero_course
 
         # Trouver le tableau qui suit la div PMU
         table = pmu_div.next
@@ -73,7 +112,7 @@ async def extraire_donnees_arrivee(html_content: str) -> Dict[str, Tuple[str, st
 
         if not table:
             logger.warning("Tableau PMU non trouvé dans le HTML.")
-            return resultats
+            return resultats_pmu, places, numero_course
 
         for row in table.css('tr'):
             cells = row.css('td')
@@ -89,54 +128,45 @@ async def extraire_donnees_arrivee(html_content: str) -> Dict[str, Tuple[str, st
                 type_pari = type_pari.text(strip=True)
                 montant = montant.replace('€', '').replace(',', '.').strip()
 
-                if numero not in resultats:
-                    resultats[numero] = ['0', '0']
+                if numero not in resultats_pmu:
+                    resultats_pmu[numero] = ['0', '0']
 
                 if type_pari == 'Gagnant':
-                    resultats[numero][0] = montant
+                    resultats_pmu[numero][0] = montant
                 elif type_pari == 'Placé':
-                    resultats[numero][1] = montant
-
-        # Ajouter le numéro de course au résultat final
-        resultats['numero_course'] = numero_course
+                    resultats_pmu[numero][1] = montant
 
         logger.info(
-            f"Extraction des données d'arrivée PMU réussie. {len(resultats) - 1} chevaux trouvés.")  # -1 pour ne pas compter le numéro de course dans le total
+            f"Extraction des données d'arrivée PMU réussie. {len(resultats_pmu)} chevaux trouvés.")
 
     except Exception as e:
         logger.error(
             f"Erreur lors de l'extraction des données d'arrivée PMU: {e}")
 
-    print(resultats)
-
-    return resultats
+    return resultats_pmu, places, numero_course
 
 
-async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], donnees_arrivee: Dict[str, Tuple[str, str]]) -> List[Dict[str, str]]:
+async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Dict[str, Tuple[str, str]], places: Dict[str, int], numero_course: str) -> List[Dict[str, str]]:
     try:
-        # Récupérer le numéro de course extrait des données d'arrivée
-        numero_course_arrivee = donnees_arrivee.get('numero_course')
-       
-        if not numero_course_arrivee:
+        if not numero_course:
             logger.error(
                 "Numéro de course manquant dans les données d'arrivée.")
             return donnees_csv
 
-        # Supprimer le numéro de course des données pour ne garder que les résultats par numéro de cheval
-        donnees_chevaux_arrivee = {
-            k: v for k, v in donnees_arrivee.items() if k != 'numero_course'}
-
         for ligne in donnees_csv:
-            # Vérifier que le numéro de course de la ligne CSV correspond au numéro de course extrait
-            if ligne['COURSE'] == numero_course_arrivee:
+            if ligne['COURSE'] == numero_course:
                 numero_cheval = ligne['NumChev']
-                if numero_cheval in donnees_chevaux_arrivee:
-                    ligne['RAP-G'], ligne['RAP-P'] = donnees_chevaux_arrivee[numero_cheval]
+                # Mise à jour des rapports
+                if numero_cheval in resultats_pmu:
+                    ligne['RAP-G'], ligne['RAP-P'] = resultats_pmu[numero_cheval]
                 else:
                     ligne['RAP-G'], ligne['RAP-P'] = '0', '0'
 
+                # Mise à jour de la place
+                ligne['PLACE'] = str(places.get(numero_cheval, 12))
+
         logger.info(
-            f"Mise à jour des données CSV réussie pour la course {numero_course_arrivee}. {len(donnees_csv)} lignes traitées.")
+            f"Mise à jour des données CSV réussie pour la course {numero_course}. {len(donnees_csv)} lignes traitées.")
     except Exception as e:
         logger.error(f"Erreur lors de la mise à jour des données CSV: {e}")
 
@@ -173,8 +203,8 @@ async def traiter_url(url: str, session: aiohttp.ClientSession, donnees_csv: Lis
             f"Impossible de continuer sans contenu HTML valide pour {url}")
         return donnees_csv
 
-    donnees_arrivee = await extraire_donnees_arrivee(html_content)
-    donnees_mises_a_jour = await mettre_a_jour_csv(donnees_csv, donnees_arrivee)
+    resultats_pmu, places, numero_course = await extraire_donnees_arrivee(html_content)
+    donnees_mises_a_jour = await mettre_a_jour_csv(donnees_csv, resultats_pmu, places, numero_course)
     return donnees_mises_a_jour
 
 
