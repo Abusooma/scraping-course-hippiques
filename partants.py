@@ -296,13 +296,24 @@ async def main():
     configurer_logger()
 
     urls = [
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-chaussee-aux-moines_c1515923",
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-prix-v-and-b_c1515922",
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-des-transports-gillois-prix-tenor-de-baune_c1515924",
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-groupe-gendry-prix-pmu-bar-de-l-etoile_c1515926",
-        "https://www.geny.com/partants-pmh/2024-09-02-craon-pmu-prix-dirickx-prix-intermede_c1515925",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-beziers_c1517317",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-lusigny_c1517311",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-la-roche-posay_c1517316",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-du-mont-saint-michel_c1517312",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-montier-en-der_c1517315",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-joseph-aveline_c1517314",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-bagnols-sur-ceze_c1517319",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-emile-wendling_c1517318",
+        "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-d-eaubonne_c1517313",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-de-la-source-chomel_c1517307",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-d-yzeure_c1517305",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-de-nevers_c1517309",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-de-billy_c1517304",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-raymond-despres_c1517308",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-traveller_c1517306",
+        "https://www.geny.com/partants-pmu/2024-09-07-vichy-pmu-prix-de-la-federation-du-centre-est_c1517310"
     ]
-
+    
     toutes_donnees = await traiter_urls(urls)
 
     if toutes_donnees:

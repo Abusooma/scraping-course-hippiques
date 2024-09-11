@@ -1,13 +1,16 @@
 import csv
+import re
 import asyncio
 import aiohttp
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 from selectolax.parser import HTMLParser
 from loguru import logger
 from typing import Optional
+from collections import defaultdict
 
 # Configuration du logger
-logger.add("log_arrivees.log", rotation="1 MB", level="WARNING", retention="3 days")
+logger.add("log_arrivees.log", rotation="1 MB",
+           level="WARNING", retention="3 days")
 
 
 async def lire_csv(nom_fichier: str) -> List[Dict[str, str]]:
@@ -39,6 +42,64 @@ def extraire_numero_course(arbre: HTMLParser) -> Optional[str]:
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction du numéro de course : {e}")
         return None
+
+
+def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
+    """Extrait le nom de l'hippodrome du HTML en préservant les accents."""
+    try:
+        noeud_hippodrome = arbre.css_first("div.nomReunion")
+        if noeud_hippodrome is None:
+            raise ValueError("Nœud 'div.nomReunion' non trouvé")
+
+        texte_hippodrome = noeud_hippodrome.text().strip()
+        if not texte_hippodrome:
+            raise ValueError("Le texte de l'hippodrome est vide")
+
+        match = re.search(r':\s*(.+?)\s*\(', texte_hippodrome)
+        if match:
+            hippodrome = match.group(1).strip()
+        else:
+            parts = texte_hippodrome.split(':')
+            if len(parts) > 1:
+                hippodrome = parts[1].split('(')[0].strip()
+            else:
+                hippodrome = texte_hippodrome
+
+        hippodrome_nettoye = re.sub(r'[^A-Za-zÀ-ÿ0-9\s-]', '', hippodrome)
+        hippodrome_nettoye = ' '.join(hippodrome_nettoye.split())
+
+        if not hippodrome_nettoye:
+            raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
+
+        return hippodrome_nettoye
+
+    except Exception as e:
+        logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
+        return None
+    
+
+def extraire_numero_partant(arbre: HTMLParser) -> Optional[str]:
+    try:
+        noeud_partant = arbre.css_first("span.infoCourse")
+        if noeud_partant:
+            texte_partant = noeud_partant.text().replace("ï¿½", "")
+        else:
+            logger.error(
+                "Aucun element avec l'attribut 'span.infoCourse' trouvé lors de l'extraction du 'partant'")
+            return None
+
+        match = re.search(r'-\s*(\d+)\s*Partants', texte_partant)
+        if match:
+            partant = match.group(1).strip()
+        else:
+            logger.error("Le partant n'a pas été trouvé lors de l'extraction")
+            return None
+        
+    except Exception as e:
+        logger.error("Une exception s'est produite lors de la récuperation du numero partant")
+        return None
+    
+    return partant
 
 
 def extraire_places(arbre: HTMLParser) -> Dict[str, int]:
@@ -76,19 +137,43 @@ def extraire_places(arbre: HTMLParser) -> Dict[str, int]:
     return places
 
 
-async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[str, str]], Dict[str, int], Optional[str]]:
+def extraire_non_partants(arbre: HTMLParser) -> Set[str]:
+    non_partants = set()
+    try:
+        div_non_partant = arbre.css_first('div.nonPartant')
+        if div_non_partant:
+            texte_non_partant = div_non_partant.text().strip()
+            match = re.search(r'Non-partant\s*:\s*(.*)', texte_non_partant)
+            if match:
+                numeros = match.group(1).split('-')
+                non_partants = set(numero.strip()
+                                   for numero in numeros if numero.strip().isdigit())
+    except Exception as e:
+        logger.error(f"Erreur lors de l'extraction des non partants : {e}")
+    return non_partants
+
+
+async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[str, str]], Dict[str, int], Optional[str], Optional[str], Set[str], Optional[str]]:
     resultats_pmu = {}
     places = {}
     numero_course = None
+    hippodrome = None
+    partant = None
+    non_partants = set()
     try:
         parser = HTMLParser(html_content)
 
         numero_course = extraire_numero_course(parser)
-        if not numero_course:
-            logger.warning("Numéro de course non trouvé dans le HTML.")
-            return resultats_pmu, places, numero_course
+        hippodrome = extraire_hippodrome(parser)
+        partant = extraire_numero_partant(parser)
+
+        if not numero_course or not hippodrome or not partant:
+            logger.warning(
+                "Numéro de course ou hippodrome ou partant non trouvé dans le HTML.")
+            return resultats_pmu, places, numero_course, hippodrome, non_partants, partant
 
         places = extraire_places(parser)
+        non_partants = extraire_non_partants(parser)
 
         # Trouver la div PMU
         pmu_div = None
@@ -99,7 +184,7 @@ async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[s
 
         if not pmu_div:
             logger.warning("Section PMU non trouvée dans le HTML.")
-            return resultats_pmu, places, numero_course
+            return resultats_pmu, places, numero_course, hippodrome, non_partants, partant
 
         # Trouver le tableau qui suit la div PMU
         table = pmu_div.next
@@ -108,7 +193,7 @@ async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[s
 
         if not table:
             logger.warning("Tableau PMU non trouvé dans le HTML.")
-            return resultats_pmu, places, numero_course
+            return resultats_pmu, places, numero_course, hippodrome, non_partants, partant
 
         for row in table.css('tr'):
             cells = row.css('td')
@@ -132,40 +217,68 @@ async def extraire_donnees_arrivee(html_content: str) -> Tuple[Dict[str, Tuple[s
                 elif type_pari == 'Placé':
                     resultats_pmu[numero][1] = montant
 
-        logger.info(
-            f"Extraction des données d'arrivée PMU réussie. {len(resultats_pmu)} chevaux trouvés.")
-
     except Exception as e:
         logger.error(
             f"Erreur lors de l'extraction des données d'arrivée PMU: {e}")
 
-    return resultats_pmu, places, numero_course
+    return resultats_pmu, places, numero_course, hippodrome, non_partants, partant
 
 
-async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Dict[str, Tuple[str, str]], places: Dict[str, int], numero_course: str) -> List[Dict[str, str]]:
+async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Dict[str, Tuple[str, str]], places: Dict[str, int], numero_course: str, hippodrome: str, non_partants: Set[str], partant: Optional[str]) -> List[Dict[str, str]]:
     try:
-        if not numero_course:
+        if not numero_course or not hippodrome or not partant:
             logger.error(
-                "Numéro de course manquant dans les données d'arrivée.")
+                "Numéro de course ou hippodrome ou partant manquant dans les données d'arrivée.")
             return donnees_csv
 
+        donnees_mises_a_jour = []
         for ligne in donnees_csv:
-            if ligne['COURSE'] == numero_course:
+            if ligne['COURSE'] == numero_course and ligne['Hippodrome'] == hippodrome:
                 numero_cheval = ligne['NumChev']
-                if numero_cheval in resultats_pmu:
-                    ligne['RAP-G'], ligne['RAP-P'] = resultats_pmu[numero_cheval]
-                else:
-                    ligne['RAP-G'], ligne['RAP-P'] = '0', '0'
+                if numero_cheval not in non_partants:
+                    if numero_cheval in resultats_pmu:
+                        ligne['RAP-G'], ligne['RAP-P'] = resultats_pmu[numero_cheval]
+                    else:
+                        ligne['RAP-G'], ligne['RAP-P'] = '0', '0'
 
-                
-                ligne['PLACE'] = str(places.get(numero_cheval, 12))
+                    ligne['PLACE'] = str(places.get(numero_cheval, 12))
 
-        logger.info(
-            f"Mise à jour des données CSV réussie pour la course {numero_course}. {len(donnees_csv)} lignes traitées.")
+                    
+                    ligne['PARTANTS'] = partant if partant is not None else ligne.get('PARTANTS', '')
+
+                    donnees_mises_a_jour.append(ligne)
+            else:
+                donnees_mises_a_jour.append(ligne)
+
+        return donnees_mises_a_jour
     except Exception as e:
         logger.error(f"Erreur lors de la mise à jour des données CSV: {e}")
+        return donnees_csv
 
-    return donnees_csv
+
+def trier_chevaux_par_hippodrome_et_classement(donnees_csv: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    try:
+        hippodromes = defaultdict(lambda: defaultdict(list))
+        for ligne in donnees_csv:
+            hippodrome = ligne['Hippodrome']
+            course = ligne['COURSE']
+            hippodromes[hippodrome][course].append(ligne)
+
+        for hippodrome in hippodromes:
+            for course in hippodromes[hippodrome]:
+                hippodromes[hippodrome][course] = sorted(
+                    hippodromes[hippodrome][course], key=lambda x: int(x['PLACE']))
+
+        donnees_triees = []
+        for hippodrome in sorted(hippodromes.keys()):
+            for course in sorted(hippodromes[hippodrome].keys()):
+                donnees_triees.extend(hippodromes[hippodrome][course])
+
+        return donnees_triees
+    except Exception as e:
+        logger.error(
+            f"Erreur lors du tri des chevaux par hippodrome et classement : {e}")
+        return donnees_csv
 
 
 async def sauvegarder_csv(donnees: List[Dict[str, str]], nom_fichier: str):
@@ -191,15 +304,14 @@ async def fetch_html(url: str, session: aiohttp.ClientSession) -> str:
 
 
 async def traiter_url(url: str, session: aiohttp.ClientSession, donnees_csv: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    logger.info(f"Traitement de l'URL: {url}")
     html_content = await fetch_html(url, session)
     if not html_content:
         logger.error(
             f"Impossible de continuer sans contenu HTML valide pour {url}")
         return donnees_csv
 
-    resultats_pmu, places, numero_course = await extraire_donnees_arrivee(html_content)
-    donnees_mises_a_jour = await mettre_a_jour_csv(donnees_csv, resultats_pmu, places, numero_course)
+    resultats_pmu, places, numero_course, hippodrome, non_partants, partant = await extraire_donnees_arrivee(html_content)
+    donnees_mises_a_jour = await mettre_a_jour_csv(donnees_csv, resultats_pmu, places, numero_course, hippodrome, non_partants, partant)
     return donnees_mises_a_jour
 
 
@@ -212,19 +324,31 @@ async def main():
         return
 
     urls_resultats = [
-        "https://www.geny.com/arrivee-et-rapports-pmh?id_course=1515922&info=2024-09-02-Craon-Prix+V+And+B",
-        "https://www.geny.com/arrivee-et-rapports-pmh/2024-09-02-craon-pmu-prix-chaussee-aux-moines_c1515923",
-        "https://www.geny.com/arrivee-et-rapports-pmh/2024-09-02-craon-pmu-prix-des-transports-gillois-prix-tenor-de-baune_c1515924",
-        "https://www.geny.com/arrivee-et-rapports-pmh/2024-09-02-craon-pmu-prix-dirickx-prix-intermede_c1515925",
-        "https://www.geny.com/arrivee-et-rapports-pmh/2024-09-02-craon-pmu-prix-groupe-gendry-prix-pmu-bar-de-l-etoile_c1515926"
+        "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1517317&info=2024-09-07-Vincennes-pmu-Prix+de+B%c3%a9ziers",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-lusigny_c1517311",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-la-roche-posay_c1517316",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-du-mont-saint-michel_c1517312",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-montier-en-der_c1517315",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-pmu-prix-joseph-aveline_c1517314",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-bagnols-sur-ceze_c1517319",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-emile-wendling_c1517318",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-d-eaubonne_c1517313",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-pmu-prix-de-la-source-chomel_c1517307",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-d-yzeure_c1517305",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-nevers_c1517309",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-billy_c1517304",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-raymond-despres_c1517308",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-traveller_c1517306",
+        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-la-federation-du-centre-est_c1517310"
     ]
 
     async with aiohttp.ClientSession() as session:
         for url in urls_resultats:
             donnees_csv = await traiter_url(url, session, donnees_csv)
 
-    # Sauvegarder le nouveau fichier CSV
-    await sauvegarder_csv(donnees_csv, 'donnees_courses_arrivees.csv')
+    donnees_triees = trier_chevaux_par_hippodrome_et_classement(donnees_csv)
+
+    await sauvegarder_csv(donnees_triees, 'donnees_courses_arrivees.csv')
 
     logger.info("Fin du traitement des arrivées")
 
