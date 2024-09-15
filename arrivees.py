@@ -324,6 +324,7 @@ async def main():
         return
 
     urls_resultats = [
+        "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1518523&info=2024-09-11-Marseille-Bor%c3%a9ly-pmu-Prix+de+Ch%c3%a2telneuf",
         "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1517317&info=2024-09-07-Vincennes-pmu-Prix+de+B%c3%a9ziers",
         "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-lusigny_c1517311",
         "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-la-roche-posay_c1517316",
