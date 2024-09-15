@@ -29,7 +29,7 @@ def extraire_date_de_url(url: str) -> str:
         objet_date = datetime.strptime(chaine_date, '%Y-%m-%d')
         return objet_date.strftime('%d/%m/%Y')
     logger.warning(f"Date non trouvée dans l'URL: {url}")
-    return ""
+    return ""     
 
 
 def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
@@ -117,7 +117,6 @@ def extraire_prix_et_partants(arbre: HTMLParser) -> Tuple[Optional[int], Optiona
 
 
 def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
-    """Extrait les chevaux, leurs gains et leurs cotes PMU du HTML."""
     donnees_chevaux = []
     try:
         tableau = arbre.css_first('table#tableau_partants')
@@ -126,14 +125,16 @@ def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
             return donnees_chevaux
 
         headers = tableau.css('thead th')
-        gains_index = next((i for i, header in enumerate(
-            headers) if header.text().strip() == "Gains"), None)
-        cotes_pmu_index = next((i for i, header in enumerate(
-            headers) if "Cotes" in header.text().strip()), None)
+        gains_index = next((i for i, header in enumerate(headers) if header.text().strip() == "Gains"), None)
 
-        if gains_index is None or cotes_pmu_index is None:
+        cotes_pmu_index = next((i for i, header in enumerate(headers) if "Cotes" in header.text().strip()), None)
+        
+        cotes_genybet_index = cotes_pmu_index + 1 if cotes_pmu_index is not None else None
+
+      
+        if gains_index is None or cotes_pmu_index is None or cotes_genybet_index is None:
             logger.error(
-                "Colonne 'Gains' ou colonne des cotes non trouvée dans le tableau")
+                "Colonne 'Gains', 'Cotes' ou 'Genybet' non trouvée dans le tableau")
             return donnees_chevaux
 
         lignes = tableau.css('tbody tr')
@@ -142,25 +143,34 @@ def extraire_chevaux_et_gains(arbre: HTMLParser) -> List[Dict[str, str]]:
                 nom_cheval = ligne.css_first('span.leftWidth100 a.lienFiche')
                 gain = ligne.css(f'td:nth-child({gains_index + 1})')
                 cote_pmu = ligne.css(f'td:nth-child({cotes_pmu_index + 1})')
-
-                if nom_cheval and gain and cote_pmu:
+                cote_genybet = ligne.css(f'td:nth-child({cotes_genybet_index + 1})')
+          
+                if nom_cheval and gain and cote_pmu and cote_genybet:
                     nom = nom_cheval.text().strip()
                     gain_texte = gain[0].text().strip() if gain else ""
-                  
                     cote_pmu_texte = cote_pmu[0].text().strip()
+                    cote_genybet_texte = cote_genybet[0].text().strip()
+
                     cote_pmu_texte = re.sub(r'[^\x20-\x7E]', '', cote_pmu_texte)
                     cote_pmu_texte = cote_pmu_texte.replace('-', "")
                     cote_pmu_texte = cote_pmu_texte.strip('"').replace(',', '.')
-                 
-                    if nom and (gain_texte or gain_texte == "") and (cote_pmu_texte or cote_pmu_texte == ""):
+
+                    cote_genybet_texte = re.sub(r'[^\x20-\x7E]', '', cote_genybet_texte)
+                    cote_genybet_texte = cote_genybet_texte.replace('-', "")
+                    cote_genybet_texte = cote_genybet_texte.strip('"').replace(',', '.')
+
+                    if nom and (gain_texte or gain_texte == "") and (cote_pmu_texte or cote_pmu_texte == "") and (cote_genybet_texte or cote_genybet_texte == ""):
                         if gain_texte == "":
                             gain_texte = '0'
                         if cote_pmu_texte == "":
                             cote_pmu_texte = '0'
+                        if cote_genybet_texte == "":
+                            cote_genybet_texte = '0'
                         donnees_chevaux.append({
                             "nom": nom,
                             "gain": gain_texte,
-                            "cote_pmu": cote_pmu_texte
+                            "cote_pmu": cote_pmu_texte,
+                            "cote_genybet": cote_genybet_texte
                         })
             except AttributeError as e:
                 logger.error(
@@ -227,7 +237,6 @@ def calculer_gains_min_max(donnees_chevaux: List[Dict[str, str]]) -> Tuple[int, 
 
 
 def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, donnees_excel: pd.DataFrame):
-    """Sauvegarde les données extraites dans un fichier CSV avec des champs enrichis."""
     noms_champs = ['DATE', 'Hippodrome', 'COURSE', 'NumChev', 'CHEVAL',
                    'PLACE', 'RAP-G', 'RAP-P', 'PARTANTS', 'I-Gains', 'I-Prix du jour',
                    'I-Moins-Riche', 'I-Plus-Riche', 'Cotes-Pmu', 'Statut',
@@ -255,7 +264,16 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, d
                         valeurs_excel[col] = '0' if pd.isna(
                             valeur) else str(valeur)
 
+                cotes_pmu_zero = sum(1 for cheval in donnees['donnees_chevaux'] if cheval['cote_pmu'] == '0')
+
+                utiliser_genybet = cotes_pmu_zero >= 5
+
                 for i, cheval in enumerate(donnees['donnees_chevaux'], start=1):
+                    cote = cheval['cote_genybet'] if utiliser_genybet else cheval['cote_pmu']
+
+                    if utiliser_genybet:
+                        cote = f"{cote} (G)"
+
                     ligne = {
                         'DATE': donnees['date'],
                         'Hippodrome': donnees['hippodrome'],
@@ -270,7 +288,7 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, d
                         'I-Prix du jour': donnees['prix'],
                         'I-Moins-Riche': moins_riche,
                         'I-Plus-Riche': plus_riche,
-                        'Cotes-Pmu': cheval['cote_pmu'],
+                        'Cotes-Pmu': cote,
                         'Statut': '',
                         **valeurs_excel
                     }
@@ -280,7 +298,7 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, d
     except Exception as e:
         logger.error(
             f"Erreur lors de la sauvegarde des données enrichies en CSV : {e}")
-        
+
 
 async def traiter_urls(urls: List[str]) -> List[Dict[str, any]]:
     """Traite une liste d'URLs de manière asynchrone."""
@@ -296,6 +314,7 @@ async def main():
     configurer_logger()
 
     urls = [
+        "https://www.geny.com/partants-pmu/2024-09-11-marseille-borely-pmu-prix-de-chatelneuf_c1518523",
         "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-beziers_c1517317",
         "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-lusigny_c1517311",
         "https://www.geny.com/partants-pmu/2024-09-07-vincennes-pmu-prix-de-la-roche-posay_c1517316",
