@@ -58,6 +58,9 @@ def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
 
         if not hippodrome_nettoye:
             raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
+        
+        if hippodrome_nettoye.lower() in "dieppe genybet":
+            hippodrome_nettoye = "Dieppe"
 
         return hippodrome_nettoye
 
@@ -272,7 +275,7 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, d
                     cote = cheval['cote_genybet'] if utiliser_genybet else cheval['cote_pmu']
 
                     if utiliser_genybet:
-                        cote = f"{cote} (G)"
+                        cote = f"(G) {cote}"
 
                     ligne = {
                         'DATE': donnees['date'],
