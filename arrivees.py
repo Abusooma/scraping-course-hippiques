@@ -41,7 +41,7 @@ def extraire_numero_course(arbre: HTMLParser) -> Optional[str]:
         return None
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction du numéro de course : {e}")
-        return None
+        return None 
 
 
 def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
