@@ -16,7 +16,11 @@ import aiohttp
 
 BASE_URL = "https://www.geny.com/"
 
-URL_UNIQUE = ""
+URLS_UNIQUES_PARTANTS = [
+    "https://www.geny.com/partants-pmu/2024-08-29-strasbourg-pmu-prix-de-vesoul_c1515246",
+    "https://www.geny.com/partants-pmu/2024-09-11-marseille-borely-pmu-prix-de-chatelneuf_c1518523",
+    "https://www.geny.com/partants-pmu/2024-08-26-vincennes-pmu-prix-de-barbizon_c1514560"
+]
 
 
 async def recuperer_les_urls(url: str) -> List[str]:
@@ -35,6 +39,19 @@ async def recuperer_les_urls(url: str) -> List[str]:
         logger.error(f"Erreur HTTP survenue pour l'URL {url}: {e}")
         return []
     
+
+async def traiter_liste_urls(liste_urls: List[str]) -> List[str]:
+    resultats = []
+
+    async def recuperer_url(url: str):
+        urls_extraites = await recuperer_les_urls(url)
+        resultats.extend(urls_extraites)
+
+    taches = [recuperer_url(url) for url in liste_urls]
+    await asyncio.gather(*taches)
+
+    return resultats
+
 
 async def contient_attele_ou_monte(url: str, session: aiohttp.ClientSession) -> bool:
     try:
@@ -323,7 +340,7 @@ def sauvegarder_en_csv(toutes_donnees: List[Dict[str, any]], nom_fichier: str, d
                     cote = cheval['cote_genybet'] if utiliser_genybet else cheval['cote_pmu']
 
                     if utiliser_genybet:
-                        cote = f"{cote} (G)"
+                        cote = f"(G) {cote}"
 
                     ligne = {
                         'DATE': donnees['date'],
@@ -370,11 +387,12 @@ async def main():
     """Fonction principale pour exécuter l'extracteur et enrichir les données."""
     configurer_logger()
 
-    if not URL_UNIQUE:
-        logger.info("Veuillez Entrer d'abord une URL dans la variable 'URL_UNIQUE' ")
+    if not URLS_UNIQUES_PARTANTS:
+        logger.info("Veuillez Entrer au moins une URL dans la liste 'URLS_UNIQUES_PARTANTS' ")
         return
 
-    urls = await recuperer_les_urls(URL_UNIQUE)
+    urls = await traiter_liste_urls(URLS_UNIQUES_PARTANTS)
+    
     
     toutes_donnees = await traiter_urls(urls)
 

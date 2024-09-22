@@ -1,3 +1,4 @@
+from urllib.parse import urljoin
 import csv
 import sys
 import re
@@ -8,6 +9,15 @@ from selectolax.parser import HTMLParser
 from loguru import logger
 from typing import Optional
 from collections import defaultdict
+
+
+BASE_URL = "https://www.geny.com/"
+
+URLS_UNIQUES_ARRIVEES = [
+    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1515246&info=2024-08-29-Strasbourg-pmu-Prix+de+Vesoul",
+    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1518523&info=2024-09-11-Marseille-Bor%c3%a9ly-pmu-Prix+de+Ch%c3%a2telneuf",
+    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1514560&info=2024-08-26-Vincennes-pmu-Prix+de+Barbizon"
+]
 
 # Configuration du logger
 def configurer_logger():
@@ -321,6 +331,37 @@ async def traiter_url(url: str, session: aiohttp.ClientSession, donnees_csv: Lis
     return donnees_mises_a_jour
 
 
+async def recuperer_les_urls(url: str) -> List[str]:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                texte_html = await response.text(encoding='utf-8')
+                arbre = HTMLParser(texte_html)
+                urls_node = arbre.css('a[accesskey]')
+                urls = [url]
+                urls += [urljoin(BASE_URL, url.attributes.get('href'))
+                         for url in urls_node if 'href' in url.attributes]
+
+                return urls
+
+    except Exception as e:
+        logger.error(f"Erreur HTTP survenue pour l'URL {url}: {e}")
+        return []
+
+
+async def traiter_liste_urls(liste_urls: List[str]) -> List[str]:
+    resultats = []
+
+    async def recuperer_url(url: str):
+        urls_extraites = await recuperer_les_urls(url)
+        resultats.extend(urls_extraites)
+
+    taches = [recuperer_url(url) for url in liste_urls]
+    await asyncio.gather(*taches)
+
+    return resultats
+
+
 async def main():
     configurer_logger()
 
@@ -331,25 +372,7 @@ async def main():
         logger.error("Impossible de continuer sans données CSV valides.")
         return
 
-    urls_resultats = [
-        "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1518523&info=2024-09-11-Marseille-Bor%c3%a9ly-pmu-Prix+de+Ch%c3%a2telneuf",
-        "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1517317&info=2024-09-07-Vincennes-pmu-Prix+de+B%c3%a9ziers",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-lusigny_c1517311",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-la-roche-posay_c1517316",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-du-mont-saint-michel_c1517312",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-montier-en-der_c1517315",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-pmu-prix-joseph-aveline_c1517314",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-de-bagnols-sur-ceze_c1517319",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-emile-wendling_c1517318",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vincennes-pmu-prix-d-eaubonne_c1517313",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-pmu-prix-de-la-source-chomel_c1517307",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-d-yzeure_c1517305",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-nevers_c1517309",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-billy_c1517304",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-raymond-despres_c1517308",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-traveller_c1517306",
-        "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-07-vichy-pmu-prix-de-la-federation-du-centre-est_c1517310"
-    ]
+    urls_resultats = await traiter_liste_urls(URLS_UNIQUES_ARRIVEES)
 
     async with aiohttp.ClientSession() as session:
         for url in urls_resultats:
