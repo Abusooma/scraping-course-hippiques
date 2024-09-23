@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 from typing import Dict, List, Tuple, Set
 from selectolax.parser import HTMLParser
+from unidecode import unidecode
 from loguru import logger
 from typing import Optional
 from collections import defaultdict
@@ -59,36 +60,27 @@ def extraire_numero_course(arbre: HTMLParser) -> Optional[str]:
         logger.error(f"Erreur lors de l'extraction du numéro de course : {e}")
         return None 
 
+    
+def normaliser_nom_hippodrome(nom_hippodrome: str) -> str:
+    """Normalise le nom de l'hippodrome pour faciliter la correspondance."""
+    nom_normalise = unidecode(nom_hippodrome.upper().strip())
+    nom_normalise = nom_normalise.replace("-", " ")
+    nom_normalise = " ".join(nom_normalise.split())
+    return nom_normalise
+
 
 def extraire_hippodrome(arbre: HTMLParser) -> Optional[str]:
-    """Extrait le nom de l'hippodrome du HTML en préservant les accents."""
     try:
-        noeud_hippodrome = arbre.css_first("div.nomReunion")
-        if noeud_hippodrome is None:
-            raise ValueError("Nœud 'div.nomReunion' non trouvé")
+        container_hippodrome = arbre.css('#yui-main a')
+        if container_hippodrome is None:
+            raise ValueError("Le div contenant l'hippodrome n'est pas trouvé")
 
-        texte_hippodrome = noeud_hippodrome.text().strip()
-        if not texte_hippodrome:
-            raise ValueError("Le texte de l'hippodrome est vide")
+        hippodrome = container_hippodrome[1].text(strip=True)
+        return normaliser_nom_hippodrome(hippodrome)
 
-        match = re.search(r':\s*(.+?)\s*\(', texte_hippodrome)
-        if match:
-            hippodrome = match.group(1).strip()
-        else:
-            parts = texte_hippodrome.split(':')
-            if len(parts) > 1:
-                hippodrome = parts[1].split('(')[0].strip()
-            else:
-                hippodrome = texte_hippodrome
-
-        hippodrome_nettoye = re.sub(r'[^A-Za-zÀ-ÿ0-9\s-]', '', hippodrome)
-        hippodrome_nettoye = ' '.join(hippodrome_nettoye.split())
-
-        if not hippodrome_nettoye:
-            raise ValueError("Le nom de l'hippodrome est vide après nettoyage")
-
-        return hippodrome_nettoye
-
+    except IndexError as e:
+        logger.error(f' Le container hippodrome ne contient pas de valeur')
+        return None
     except Exception as e:
         logger.error(f"Erreur lors de l'extraction de l'hippodrome : {e}")
         return None
@@ -249,7 +241,7 @@ async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Di
 
         donnees_mises_a_jour = []
         for ligne in donnees_csv:
-            if ligne['COURSE'] == numero_course and ligne['Hippodrome'] == hippodrome:
+            if ligne['COURSE'] == numero_course and normaliser_nom_hippodrome(ligne['Hippodrome']) == hippodrome:
                 numero_cheval = ligne['NumChev']
                 if numero_cheval not in non_partants:
                     if numero_cheval in resultats_pmu:
@@ -259,8 +251,8 @@ async def mettre_a_jour_csv(donnees_csv: List[Dict[str, str]], resultats_pmu: Di
 
                     ligne['PLACE'] = str(places.get(numero_cheval, 12))
 
-                    
-                    ligne['PARTANTS'] = partant if partant is not None else ligne.get('PARTANTS', '')
+                    ligne['PARTANTS'] = partant if partant is not None else ligne.get(
+                        'PARTANTS', '')
 
                     donnees_mises_a_jour.append(ligne)
             else:
@@ -276,7 +268,7 @@ def trier_chevaux_par_hippodrome_et_classement(donnees_csv: List[Dict[str, str]]
     try:
         hippodromes = defaultdict(lambda: defaultdict(list))
         for ligne in donnees_csv:
-            hippodrome = ligne['Hippodrome']
+            hippodrome = normaliser_nom_hippodrome(ligne['Hippodrome'])
             course = ligne['COURSE']
             hippodromes[hippodrome][course].append(ligne)
 
