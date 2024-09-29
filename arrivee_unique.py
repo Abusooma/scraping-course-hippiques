@@ -15,9 +15,7 @@ from collections import defaultdict
 BASE_URL = "https://www.geny.com/"
 
 URLS_UNIQUES_ARRIVEES = [
-    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1515246&info=2024-08-29-Strasbourg-pmu-Prix+de+Vesoul",
-    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1518523&info=2024-09-11-Marseille-Bor%c3%a9ly-pmu-Prix+de+Ch%c3%a2telneuf",
-    "https://www.geny.com/arrivee-et-rapports-pmu?id_course=1514560&info=2024-08-26-Vincennes-pmu-Prix+de+Barbizon"
+    "https://www.geny.com/arrivee-et-rapports-pmu/2024-09-24-vincennes-pmu-prix-hekate_c1521138"
 ]
 
 # Configuration du logger

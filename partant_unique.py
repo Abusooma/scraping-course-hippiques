@@ -17,9 +17,7 @@ import aiohttp
 BASE_URL = "https://www.geny.com/"
 
 URLS_UNIQUES_PARTANTS = [
-    "https://www.geny.com/partants-pmu/2024-08-29-strasbourg-pmu-prix-de-vesoul_c1515246",
-    "https://www.geny.com/partants-pmu/2024-09-11-marseille-borely-pmu-prix-de-chatelneuf_c1518523",
-    "https://www.geny.com/partants-pmu/2024-08-26-vincennes-pmu-prix-de-barbizon_c1514560"
+    "https://www.geny.com/partants-pmu/2024-09-24-vincennes-pmu-prix-hekate_c1521138"
 ]
 
 
