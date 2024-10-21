@@ -1,0 +1,11 @@
+1 - Etape 1:
+    Lire le fichier excel Depart pour recuperer les valeurs I-Place-1, I-Place-2 et I-Place-3
+
+Etape 2 :
+    Lire le fichier excel reference pour recuperer toutes les valeurs de Place et Nbr-Partant
+
+Etape 3:
+    Créer un nouveau fichier Excel qui contiendra toutes les valeurs mappées correctement
+
+Etape 4:
+    Remplir les colonnes T-Places-No , Partant-No, Nbr-Partant-No dans le fichier Excel
